@@ -1,8 +1,10 @@
 use native_tls::{TlsConnector, TlsStream};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+use clap::{Parser, Subcommand};
 
 const GEMINI_PORT: u16 = 1965;
+const DEFAULT_HOST: &'static str = "gemini.circumlunar.space";
 
 #[derive(Debug, Clone)]
 struct ResponseHeader {
@@ -71,6 +73,15 @@ impl Into<StatusCodes> for u8 {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[arg(default_value_t = DEFAULT_HOST.to_string())]
+    domain: String,
+    #[arg(default_value_t = GEMINI_PORT, value_parser = clap::value_parser!(u16).range(1..))]
+    port: u16
+}
+
 fn create_stream(domain: &str) -> TlsStream<TcpStream> {
     let connector = TlsConnector::builder()
         .danger_accept_invalid_certs(true)
@@ -121,13 +132,13 @@ fn handle_response_header(header: ResponseHeader, mut stream: TlsStream<TcpStrea
 }
 
 fn main() {
-    let domain = "gemini.circumlunar.space";
-    let mut stream = create_stream(domain);
-    let uri = build_uri(domain, "/docs/specification.gmi");
+    let cli = Cli::parse();
+    let domain = cli.domain;
+    let mut stream = create_stream(&domain);
+    let uri = build_uri(&domain, "/");
 
     send_request(&mut stream, &uri);
     let header = read_response_header(&mut stream);
 
     handle_response_header(header, stream);
-
 }
