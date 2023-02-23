@@ -1,7 +1,7 @@
+use clap::Parser;
 use native_tls::{TlsConnector, TlsStream};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
-use clap::{Parser, Subcommand};
 
 const GEMINI_PORT: u16 = 1965;
 const DEFAULT_HOST: &'static str = "gemini.circumlunar.space";
@@ -79,7 +79,7 @@ struct Cli {
     #[arg(default_value_t = DEFAULT_HOST.to_string())]
     domain: String,
     #[arg(default_value_t = GEMINI_PORT, value_parser = clap::value_parser!(u16).range(1..))]
-    port: u16
+    port: u16,
 }
 
 fn create_stream(domain: &str) -> TlsStream<TcpStream> {
@@ -118,7 +118,8 @@ fn read_response_body(stream: &mut TlsStream<TcpStream>) -> String {
     buf
 }
 
-fn handle_success(_header: &ResponseHeader, stream: &mut TlsStream<TcpStream>) {
+fn handle_success(header: &ResponseHeader, stream: &mut TlsStream<TcpStream>) {
+    assert!(header.meta.starts_with("text/"), "I only know how to handle text MIME types");
     let body = read_response_body(stream);
     println!("Server returned:\n{body}");
 }
@@ -127,18 +128,28 @@ fn handle_response_header(header: ResponseHeader, mut stream: TlsStream<TcpStrea
     match header.status {
         StatusCodes::Success => handle_success(&header, &mut stream),
         StatusCodes::NotFound => eprintln!("Page not found!"),
+        StatusCodes::BadRequest => eprintln!("Oops! Looks like we made a bad request :( please try again."),
         _ => eprintln!("I don't know how to handle {:?}", header.status),
     }
 }
 
-fn main() {
+fn main() -> io::Result<()> {
     let cli = Cli::parse();
     let domain = cli.domain;
     let mut stream = create_stream(&domain);
-    let uri = build_uri(&domain, "/");
+
+    println!("What resource do you want to access on {domain}?: ");
+    let resource = if let Some(resource_str) = io::stdin().lines().next() {
+        resource_str?
+    } else {
+        "/".to_owned()
+    };
+    let uri = build_uri(&domain, &resource);
 
     send_request(&mut stream, &uri);
     let header = read_response_header(&mut stream);
 
     handle_response_header(header, stream);
+
+    Ok(())
 }
