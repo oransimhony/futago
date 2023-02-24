@@ -7,9 +7,10 @@ const GEMINI_PORT: u16 = 1965;
 const DEFAULT_HOST: &'static str = "gemini.circumlunar.space";
 
 #[derive(Debug, Clone)]
-struct ResponseHeader {
+struct Response {
     status: StatusCodes,
     meta: String,
+    body: String,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -104,44 +105,66 @@ fn send_request(stream: &mut TlsStream<TcpStream>, uri: &str) {
     stream.write_all(uri.as_bytes()).expect("write failed");
 }
 
-fn read_response_header(stream: &mut TlsStream<TcpStream>) -> ResponseHeader {
+fn read_response_header(stream: &mut TlsStream<TcpStream>) -> Response {
     let mut space = String::new();
     let mut status_buf = String::new();
     stream.take(2).read_to_string(&mut status_buf).unwrap();
     stream.take(1).read_to_string(&mut space).unwrap();
     assert_eq!(space, " ".to_owned());
     let buf = BufReader::new(stream);
-    ResponseHeader {
+    Response {
         status: status_buf.parse::<u8>().unwrap().into(),
         meta: buf.lines().next().unwrap().unwrap(),
+        body: String::from(""),
     }
 }
 
-fn read_response_body(stream: &mut TlsStream<TcpStream>) -> String {
-    let mut buf = String::new();
-    stream.read_to_string(&mut buf).unwrap();
-    buf
+fn read_response_body(stream: &mut TlsStream<TcpStream>, response: &mut Response) {
+    stream.read_to_string(&mut response.body).unwrap();
 }
 
-fn handle_success(header: &ResponseHeader, stream: &mut TlsStream<TcpStream>) {
-    assert!(header.meta.starts_with("text/"), "I only know how to handle text MIME types");
-    let body = read_response_body(stream);
-    println!("Server returned:\n{body}");
+fn handle_success(response: &mut Response, stream: &mut TlsStream<TcpStream>) {
+    assert!(
+        response.meta.starts_with("text/"),
+        "I only know how to handle text MIME types"
+    );
+    read_response_body(stream, response);
+    println!("Server returned:\n{}", response.body);
 }
 
-fn handle_response_header(header: ResponseHeader, mut stream: TlsStream<TcpStream>) {
-    match header.status {
-        StatusCodes::Success => handle_success(&header, &mut stream),
+fn handle_response_header(mut response: Response, mut stream: TlsStream<TcpStream>) {
+    match response.status {
+        StatusCodes::Success => handle_success(&mut response, &mut stream),
         StatusCodes::NotFound => eprintln!("Page not found!"),
-        StatusCodes::BadRequest => eprintln!("Oops! Looks like we made a bad request :( please try again."),
-        _ => eprintln!("I don't know how to handle {:?}", header.status),
+        StatusCodes::BadRequest => {
+            eprintln!("Oops! Looks like we made a bad request :( please try again.")
+        }
+        StatusCodes::RedirectPermanent | StatusCodes::RedirectTemporary => {
+            eprintln!("TODO: Got a redirect to {}", response.meta)
+        }
+        StatusCodes::TemporaryFailure => eprint!(
+            "We failed - but only for now. This is what the server returned: {}",
+            response.meta
+        ),
+        StatusCodes::PermanentFailure => eprintln!(
+            "We failed - big time. This is what the server returned: {}",
+            response.meta
+        ),
+        _ => eprintln!("I don't know how to handle {:?}", response.status),
     }
+}
+
+fn fetch_resource(domain: &str, resource: &str) -> TlsStream<TcpStream> {
+    let uri = build_uri(&domain, &resource);
+    eprintln!("INFO: Requesting {uri}");
+    let mut stream = create_stream(&domain);
+    send_request(&mut stream, &uri);
+    stream
 }
 
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
     let domain = cli.domain;
-    let mut stream = create_stream(&domain);
 
     println!("What resource do you want to access on {domain}?: ");
     let resource = if let Some(resource_str) = io::stdin().lines().next() {
@@ -149,12 +172,12 @@ fn main() -> io::Result<()> {
     } else {
         "/".to_owned()
     };
-    let uri = build_uri(&domain, &resource);
 
-    send_request(&mut stream, &uri);
-    let header = read_response_header(&mut stream);
+    let mut stream = fetch_resource(&domain, &resource);
 
-    handle_response_header(header, stream);
+    let response = read_response_header(&mut stream);
+
+    handle_response_header(response, stream);
 
     Ok(())
 }
