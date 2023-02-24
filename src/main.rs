@@ -76,9 +76,9 @@ impl Into<StatusCodes> for u8 {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    #[arg(default_value_t = DEFAULT_HOST.to_string())]
+    #[arg(default_value_t = DEFAULT_HOST.to_string(), help = "the domain to connect to (without scheme)")]
     domain: String,
-    #[arg(default_value_t = GEMINI_PORT, value_parser = clap::value_parser!(u16).range(1..))]
+    #[arg(default_value_t = GEMINI_PORT, value_parser = clap::value_parser!(u16).range(1..), help = "the port the gemini server runs on")]
     port: u16,
 }
 
