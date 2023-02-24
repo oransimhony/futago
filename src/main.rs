@@ -92,7 +92,12 @@ fn create_stream(domain: &str) -> TlsStream<TcpStream> {
 }
 
 fn build_uri(domain: &str, resource: &str) -> String {
-    format!("gemini://{}{}\r\n", domain, resource)
+    let scheme = if domain.starts_with("gemini://") {
+        ""
+    } else {
+        "gemini://"
+    };
+    format!("{}{}{}\r\n", scheme, domain, resource)
 }
 
 fn send_request(stream: &mut TlsStream<TcpStream>, uri: &str) {
